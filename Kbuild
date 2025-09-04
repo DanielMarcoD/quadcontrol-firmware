@@ -1,1 +1,1 @@
-obj-y += src/identification/motor_coeficients.o
+obj-y += src/identification/drag_constant.o
