@@ -1,1 +1,1 @@
-obj-y += src/identification/drag_constant.o
+obj-y += src/control/mixer.o
