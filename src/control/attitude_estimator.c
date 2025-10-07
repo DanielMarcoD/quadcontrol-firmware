@@ -8,6 +8,14 @@
 #include "debug.h"      // Debug printing functions (e.g., DEBUG_PRINT)
 #include "log.h"        // Logging utilities to send data to the CFClient
 
+// Sensors
+float ax, ay, az;             // Accelerometer [m/s^2]
+float gx, gy, gz;             // Gyroscope [rad/s]
+
+// System states
+float phi, theta, psi;        // Euler angles [rad]
+float wx, wy, wz;             // Angular velocities [rad/s]
+
 
 // Physical constants
 static const float pi = 3.1416f; // Mathematical constant
@@ -27,6 +35,16 @@ float pwm1, pwm2, pwm3, pwm4; // Motors PWM
 // System inputs
 float ft;                     // Thrust force [N]
 float tx, ty, tz;             // Roll, pitch and yaw torques [N.m]
+
+// Auxiliary variables for logging Euler angles (CFClient uses degrees and not radians)
+float log_phi, log_theta, log_psi;
+
+// Logging group that stream variables to CFClient.
+LOG_GROUP_START(stateEstimate)
+LOG_ADD_CORE(LOG_FLOAT, roll, &log_phi)
+LOG_ADD_CORE(LOG_FLOAT, pitch, &log_theta)
+LOG_ADD_CORE(LOG_FLOAT, yaw, &log_psi)
+LOG_GROUP_STOP(stateEstimate)
 
 // Get reference setpoints from commander module
 void reference()
@@ -99,15 +117,79 @@ void actuators()
     }
 }
 
+// Get sensor readings from estimator module
+void sensors()
+{
+    // Declare variable that store the most recent measurement from estimator
+    static measurement_t measurement;
+
+    // Retrieve the current measurement from estimator module
+    while (estimatorDequeue(&measurement))
+    {
+        switch (measurement.type)
+        {
+        // Get accelerometer sensor readings and convert [G's -> m/s^2]
+        case MeasurementTypeAcceleration:
+            ax = -measurement.data.acceleration.acc.x * g;
+            ay = -measurement.data.acceleration.acc.y * g;
+            az = -measurement.data.acceleration.acc.z * g;
+            break;
+        // Get gyroscope sensor readings and convert [deg/s -> rad/s]
+        case MeasurementTypeGyroscope:
+            gx = measurement.data.gyroscope.gyro.x * pi / 180.0f;
+            gy = measurement.data.gyroscope.gyro.y * pi / 180.0f;
+            gz = measurement.data.gyroscope.gyro.z * pi / 180.0f;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+
+// Estimate orientation from IMU sensor
+void attitudeEstimator()
+{
+    // Estimator parameters
+    static const float wc = 1.0f; // Cut-off frequency [rad/s]
+    static const float alpha = wc * dt / (1.0f + wc * dt); // Complementary filter coefficient
+
+    // Measured angles from accelerometer
+    float phi_a = atan2f(-ay, -az);
+    float theta_a = atan2f(ax, sqrtf(ay*ay + az*az));
+
+    // Measured angles from gyroscope
+    float phi_g = phi + (gx + gy * sinf(phi) * tanf(theta) + gz * cosf(phi) * tanf(theta)) * dt;
+    float theta_g = theta + (gy * cosf(phi) - gz * sinf(phi)) * dt;
+    float psi_g = psi + (gy * sinf(phi) / cosf(theta) + gz * cosf(phi) / cosf(theta)) * dt;
+
+    // Estimated angles (accelerometer and gyroscope with complementary filter)
+    phi = (1.0f - alpha) * phi_g + alpha * phi_a;
+    theta = (1.0f - alpha) * theta_g + alpha * theta_a;
+    psi = psi_g;
+
+    // Angular velocities estimation (gyroscope)
+    wx = gx;
+    wy = gy;
+    wz = gz;
+
+    // Auxiliary variables for logging Euler angles (CFClient uses degrees and not radians)
+    log_phi = phi * 180.0f / pi;
+    log_theta = -theta * 180.0f / pi;
+    log_psi = psi * 180.0f / pi;
+}
+
 // Main application task
 void appMain(void *param)
 {
     // Infinite loop (runs at 200Hz)
     while (true)
     {
-        reference();                  // Get reference setpoints from commander module
-        mixer();                      // Compute motor commands
-        actuators();                     // Apply motor commands
-        vTaskDelay(pdMS_TO_TICKS(5)); // Wait 5 ms
+        reference();                  // Read reference setpoints (from Crazyflie Client)
+        sensors();                    // Read raw sensor measurements
+        attitudeEstimator();          // Estimate orientation (roll/pitch/yaw) from IMU sensor
+        mixer();                      // Convert desired force/torques into motor PWM
+        actuators();                  // Send commands to motors
+        vTaskDelay(pdMS_TO_TICKS(5)); // Loop delay (5 ms)
     }
 }
