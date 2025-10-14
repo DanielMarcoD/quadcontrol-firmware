@@ -1,1 +1,1 @@
-obj-y += src/control/attitude_estimator.o
+obj-y += src/control/attitude_controller.o
