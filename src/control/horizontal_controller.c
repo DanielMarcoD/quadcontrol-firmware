@@ -330,30 +330,13 @@ void horizontalEstimator()
 
 void horizontalController()
 {
-    // Ganhos do controlador (ajuste conforme necessário)
-    const float kp = 240.28f;
-    const float kd = 26.67f;
+    // Controller parameters (settling time of 3.0s and overshoot of 0,05%)
+    static const float kp = 2.40f;
+    static const float kd = 2.67f;
 
-    const float kp_psi = kp/4;
-    const float kd_psi = kd/2;
-
-    float phi_dot_r = 0.0f; // Velocidade angular de referência
-    float phi_dot = wx;                 // Velocidade angular atual
-    float phi_ddot_r = kp * (phi_r - phi) + kd * (phi_dot_r - phi_dot); // Aceleração angular de referência
-
-    float theta_dot_r = 0.0f; // Velocidade angular de referência
-    float theta_dot = wy;                 // Velocidade angular atual
-    float theta_ddot_r = kp * (theta_r - theta) + kd * (theta_dot_r - theta_dot); // Aceleração angular de referência
-
-    float psi_dot_r = 0.0f; // Velocidade angular de referência
-    float psi_dot = wz;                 // Velocidade angular atual
-    float psi_ddot_r = kp_psi * (psi_r - psi) + kd_psi * (psi_dot_r - psi_dot); // Aceleração angular de referência
-
-    // 4) Torque comandado no eixo y (pitch)
-    tx = Ixx * phi_ddot_r;
-    ty = Iyy * theta_ddot_r;
-    tz = Izz * psi_ddot_r;
-
+    // Compute angle reference (nested control)
+    phi_r = -(1.0f / g) * (kp * (y_r - y) - kd * vy);
+    theta_r = (1.0f / g) * (kp * (x_r - x) - kd * vx);
 }
 
 // Main application task
